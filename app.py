@@ -1,98 +1,109 @@
-
 import os
-import pickle
 import joblib
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, render_template_string, request, jsonify
 
 app = Flask(__name__)
 
-# Load model and vectorizer with fallback between joblib and pickle
-def load_artifact(filename):
-    if os.path.exists(filename):
-        try:
-            return joblib.load(filename)
-        except Exception:
-            with open(filename, 'rb') as f:
-                return pickle.load(f)
-    else:
-        print(f"Warning: {filename} not found.")
-        return None
+# Load model and vectorizer
+MODEL_PATH = "model.pkl"
+VECTORIZER_PATH = "vectorizer.pkl"
 
-model = load_artifact('model.pkl')
-vectorizer = load_artifact('vectorizer.pkl')
+try:
+    model = joblib.load(MODEL_PATH)
+    vectorizer = joblib.load(VECTORIZER_PATH)
+    print("Model and vectorizer loaded successfully.")
+except Exception as e:
+    model = None
+    vectorizer = None
+    print(f"Error loading model or vectorizer: {e}")
 
+# Single-file HTML/CSS/JS with Glassmorphism UI
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sentiment Analysis AI</title>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <title>AI Sentiment Analysis</title>
+
+    <!-- Google Fonts & FontAwesome -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
     <style>
         :root {
-            --bg-gradient: linear-gradient(135deg, #0f0c20 0%, #151030 50%, #090514 100%);
+            --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%);
             --glass-bg: rgba(255, 255, 255, 0.05);
             --glass-border: rgba(255, 255, 255, 0.12);
-            --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-            --accent-cyan: #00f2fe;
-            --accent-purple: #9d4edd;
-            --accent-pink: #ff2a85;
-            --text-main: #f8f9fa;
-            --text-sub: #a0a5b5;
+            --glass-shadow: 0 25px 45px rgba(0, 0, 0, 0.4);
+            --accent-cyan: #06b6d4;
+            --accent-purple: #a855f7;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
         }
 
         * {
-            box-sizing: border-box;
             margin: 0;
             padding: 0;
+            box-sizing: border-box;
             font-family: 'Plus Jakarta Sans', sans-serif;
         }
 
         body {
-            background: var(--bg-gradient);
             min-height: 100vh;
+            background: var(--bg-gradient);
+            background-size: 400% 400%;
+            animation: gradientShift 15s ease infinite;
             display: flex;
-            align-items: center;
             justify-content: center;
+            align-items: center;
             padding: 20px;
-            color: var(--text-main);
             overflow-x: hidden;
-            position: relative;
+            color: var(--text-main);
         }
 
-        /* Ambient Glowing Orbs */
-        body::before, body::after {
-            content: '';
+        @keyframes gradientShift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        /* Ambient Glow Spheres */
+        .ambient-sphere {
             position: absolute;
             border-radius: 50%;
-            filter: blur(120px);
+            filter: blur(80px);
             z-index: 0;
-            animation: pulse 8s ease-in-out infinite alternate;
+            opacity: 0.6;
+            animation: float 8s ease-in-out infinite alternate;
         }
-        body::before {
-            width: 350px;
-            height: 350px;
-            background: rgba(157, 78, 221, 0.35);
+
+        .sphere-1 {
+            width: 300px;
+            height: 300px;
+            background: #a855f7;
             top: 10%;
             left: 15%;
         }
-        body::after {
-            width: 400px;
-            height: 400px;
-            background: rgba(0, 242, 254, 0.25);
+
+        .sphere-2 {
+            width: 350px;
+            height: 350px;
+            background: #06b6d4;
             bottom: 10%;
             right: 15%;
+            animation-delay: -4s;
         }
 
-        @keyframes pulse {
-            0% { transform: scale(1) translate(0, 0); }
-            100% { transform: scale(1.15) translate(20px, -20px); }
+        @keyframes float {
+            0% { transform: translateY(0px) scale(1); }
+            100% { transform: translateY(-30px) scale(1.08); }
         }
 
-        .container {
+        /* Glassmorphism Container */
+        .glass-card {
             position: relative;
-            z-index: 1;
+            z-index: 10;
             width: 100%;
             max-width: 650px;
             background: var(--glass-bg);
@@ -102,60 +113,47 @@ HTML_TEMPLATE = """
             border-radius: 24px;
             padding: 40px;
             box-shadow: var(--glass-shadow);
-            animation: slideUp 0.8s ease-out;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
         }
 
-        @keyframes slideUp {
-            from { opacity: 0; transform: translateY(30px); }
-            to { opacity: 1; transform: translateY(0); }
+        .glass-card:hover {
+            border-color: rgba(255, 255, 255, 0.2);
+            box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5), 0 0 30px rgba(168, 85, 247, 0.15);
         }
 
-        header {
+        .header {
             text-align: center;
-            margin-bottom: 32px;
+            margin-bottom: 30px;
         }
 
-        .badge {
-            display: inline-block;
-            padding: 6px 16px;
-            border-radius: 50px;
-            background: rgba(0, 242, 254, 0.1);
-            border: 1px solid rgba(0, 242, 254, 0.3);
-            color: var(--accent-cyan);
-            font-size: 0.8rem;
-            font-weight: 600;
-            letter-spacing: 1px;
-            text-transform: uppercase;
-            margin-bottom: 12px;
-        }
-
-        h1 {
+        .header h1 {
             font-size: 2.2rem;
             font-weight: 700;
-            background: linear-gradient(135deg, #ffffff 0%, #a0a5b5 100%);
+            background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
-            margin-bottom: 8px;
+            margin-bottom: 10px;
         }
 
-        p.subtitle {
-            color: var(--text-sub);
+        .header p {
+            color: var(--text-muted);
             font-size: 0.95rem;
         }
 
+        /* Input Area */
         .input-group {
+            margin-bottom: 25px;
             position: relative;
-            margin-bottom: 24px;
         }
 
         textarea {
             width: 100%;
             height: 140px;
-            background: rgba(0, 0, 0, 0.25);
-            border: 1px solid var(--glass-border);
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.15);
             border-radius: 16px;
-            padding: 18px;
-            color: var(--text-main);
+            padding: 16px;
+            color: #ffffff;
             font-size: 1rem;
             resize: none;
             outline: none;
@@ -164,224 +162,269 @@ HTML_TEMPLATE = """
 
         textarea:focus {
             border-color: var(--accent-cyan);
-            box-shadow: 0 0 15px rgba(0, 242, 254, 0.25);
-            background: rgba(0, 0, 0, 0.35);
+            box-shadow: 0 0 20px rgba(6, 182, 212, 0.25);
+            background: rgba(15, 23, 42, 0.8);
         }
 
         textarea::placeholder {
-            color: rgba(255, 255, 255, 0.3);
+            color: #64748b;
         }
 
-        .btn-submit {
-            width: 100%;
-            padding: 16px;
+        /* Action Buttons */
+        .button-group {
+            display: flex;
+            gap: 12px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 14px 24px;
             border: none;
-            border-radius: 16px;
-            background: linear-gradient(135deg, var(--accent-purple) 0%, var(--accent-cyan) 100%);
-            color: #fff;
+            border-radius: 14px;
             font-size: 1rem;
-            font-weight: 700;
+            font-weight: 600;
             cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 20px rgba(157, 78, 221, 0.4);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 10px;
+            gap: 8px;
+        }
+
+        .btn-submit {
+            background: linear-gradient(135deg, var(--accent-purple) 0%, var(--accent-cyan) 100%);
+            color: #ffffff;
+            box-shadow: 0 8px 20px rgba(168, 85, 247, 0.3);
         }
 
         .btn-submit:hover {
             transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(0, 242, 254, 0.5);
+            box-shadow: 0 12px 28px rgba(6, 182, 212, 0.4);
+            filter: brightness(1.1);
         }
 
         .btn-submit:active {
             transform: translateY(0);
         }
 
-        /* Result Card */
-        .result-box {
-            margin-top: 28px;
-            padding: 24px;
-            border-radius: 18px;
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid var(--glass-border);
-            display: none;
+        .btn-clear {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-muted);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .btn-clear:hover {
+            background: rgba(255, 255, 255, 0.15);
+            color: #ffffff;
+        }
+
+        /* Result Display Container */
+        .result-container {
+            margin-top: 25px;
             opacity: 0;
-            transition: all 0.4s ease;
-            text-align: center;
-        }
-
-        .result-box.show {
-            display: block;
-            opacity: 1;
-            animation: fadeIn 0.5s ease-in;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: scale(0.95); }
-            to { opacity: 1; transform: scale(1); }
-        }
-
-        .sentiment-title {
-            font-size: 0.85rem;
-            color: var(--text-sub);
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 8px;
-        }
-
-        .sentiment-value {
-            font-size: 1.8rem;
-            font-weight: 700;
-            margin-bottom: 12px;
-        }
-
-        .sentiment-positive {
-            color: #00ffaa;
-            text-shadow: 0 0 12px rgba(0, 255, 170, 0.4);
-        }
-
-        .sentiment-negative {
-            color: var(--accent-pink);
-            text-shadow: 0 0 12px rgba(255, 42, 133, 0.4);
-        }
-
-        .sentiment-neutral {
-            color: #ffb703;
-            text-shadow: 0 0 12px rgba(255, 183, 3, 0.4);
-        }
-
-        .confidence-bar-bg {
-            width: 100%;
-            height: 8px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 10px;
+            max-height: 0;
             overflow: hidden;
-            margin-top: 10px;
+            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
-        .confidence-bar-fill {
-            height: 100%;
-            width: 0%;
-            border-radius: 10px;
-            transition: width 0.8s ease-out;
+        .result-container.show {
+            opacity: 1;
+            max-height: 200px;
         }
 
-        .loader {
-            width: 22px;
-            height: 22px;
-            border: 3px solid rgba(255,255,255,0.3);
-            border-radius: 50%;
-            border-top-color: #fff;
-            animation: spin 0.8s linear infinite;
+        .result-badge {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 16px;
+            padding: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            backdrop-filter: blur(10px);
+        }
+
+        .sentiment-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .sentiment-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+        }
+
+        .positive .sentiment-icon {
+            background: rgba(34, 197, 94, 0.2);
+            color: #4ade80;
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+
+        .negative .sentiment-icon {
+            background: rgba(239, 68, 68, 0.2);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .neutral .sentiment-icon {
+            background: rgba(234, 179, 8, 0.2);
+            color: #facc15;
+            border: 1px solid rgba(234, 179, 8, 0.3);
+        }
+
+        .sentiment-text h3 {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        .sentiment-text p {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        /* Loading Spinner */
+        .spinner {
             display: none;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #ffffff;
+            animation: spin 0.8s linear infinite;
         }
 
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+
+        @media (max-width: 480px) {
+            .glass-card { padding: 25px; }
+            .button-group { flex-direction: column; }
+        }
     </style>
 </head>
 <body>
 
-    <div class="container">
-        <header>
-            <span class="badge">NLP Powered</span>
-            <h1>Sentiment Analysis</h1>
-            <p class="subtitle">Enter any review or phrase to analyze its underlying emotion.</p>
-        </header>
+    <div class="ambient-sphere sphere-1"></div>
+    <div class="ambient-sphere sphere-2"></div>
 
-        <form id="analyzerForm">
+    <div class="glass-card">
+        <div class="header">
+            <h1><i class="fa-solid fa-brain-circuit" style="margin-right: 8px; color: var(--accent-cyan);"></i>Sentiment AI</h1>
+            <p>Analyze the emotional tone of any input text instantly</p>
+        </div>
+
+        <form id="sentimentForm">
             <div class="input-group">
-                <textarea id="inputText" placeholder="Type or paste text here (e.g., 'This product exceeded all my expectations!')" required></textarea>
+                <textarea id="userInput" placeholder="Type or paste your text here..." required></textarea>
             </div>
-            <button type="submit" class="btn-submit" id="submitBtn">
-                <span id="btnText">Analyze Sentiment</span>
-                <div class="loader" id="btnLoader"></div>
-            </button>
+
+            <div class="button-group">
+                <button type="button" class="btn btn-clear" id="clearBtn">
+                    <i class="fa-solid fa-rotate-left"></i> Clear
+                </button>
+                <button type="submit" class="btn btn-submit" id="submitBtn">
+                    <span id="btnText"><i class="fa-solid fa-wand-magic-sparkles"></i> Analyze Sentiment</span>
+                    <div class="spinner" id="btnSpinner"></div>
+                </button>
+            </div>
         </form>
 
-        <div class="result-box" id="resultBox">
-            <div class="sentiment-title">Predicted Sentiment</div>
-            <div class="sentiment-value" id="sentimentResult">-</div>
-            <div id="confidenceContainer" style="display: none;">
-                <span style="font-size: 0.85rem; color: var(--text-sub);" id="confidenceText">Score: 0%</span>
-                <div class="confidence-bar-bg">
-                    <div class="confidence-bar-fill" id="confidenceFill"></div>
+        <div class="result-container" id="resultContainer">
+            <div class="result-badge" id="resultBadge">
+                <div class="sentiment-info">
+                    <div class="sentiment-icon" id="sentimentIcon">
+                        <i class="fa-solid fa-face-smile"></i>
+                    </div>
+                    <div class="sentiment-text">
+                        <h3 id="sentimentTitle">Positive Sentiment</h3>
+                        <p id="sentimentDesc">The model predicts positive emotion in this text.</p>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
     <script>
-        document.getElementById('analyzerForm').addEventListener('submit', async (e) => {
+        const form = document.getElementById('sentimentForm');
+        const userInput = document.getElementById('userInput');
+        const clearBtn = document.getElementById('clearBtn');
+        const submitBtn = document.getElementById('submitBtn');
+        const btnText = document.getElementById('btnText');
+        const btnSpinner = document.getElementById('btnSpinner');
+        const resultContainer = document.getElementById('resultContainer');
+        const resultBadge = document.getElementById('resultBadge');
+        const sentimentIcon = document.getElementById('sentimentIcon');
+        const sentimentTitle = document.getElementById('sentimentTitle');
+        const sentimentDesc = document.getElementById('sentimentDesc');
+
+        clearBtn.addEventListener('click', () => {
+            userInput.value = '';
+            resultContainer.classList.remove('show');
+            userInput.focus();
+        });
+
+        form.addEventListener('submit', async (e) => {
             e.preventDefault();
-            const text = document.getElementById('inputText').value.trim();
+            const text = userInput.value.trim();
             if (!text) return;
 
-            const submitBtn = document.getElementById('submitBtn');
-            const btnText = document.getElementById('btnText');
-            const btnLoader = document.getElementById('btnLoader');
-            const resultBox = document.getElementById('resultBox');
-            const sentimentResult = document.getElementById('sentimentResult');
-            const confidenceContainer = document.getElementById('confidenceContainer');
-            const confidenceText = document.getElementById('confidenceText');
-            const confidenceFill = document.getElementById('confidenceFill');
-
             // UI Loading state
-            btnText.innerText = "Analyzing...";
-            btnLoader.style.display = "block";
+            btnText.style.display = 'none';
+            btnSpinner.style.display = 'block';
             submitBtn.disabled = true;
 
             try {
                 const response = await fetch('/predict', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text })
+                    body: JSON.stringify({ text: text })
                 });
 
                 const data = await response.json();
 
-                if (data.error) {
-                    alert(data.error);
+                if (response.ok) {
+                    displayResult(data.prediction);
                 } else {
-                    const sentiment = data.sentiment.toString().toLowerCase();
-                    sentimentResult.innerText = data.sentiment;
-                    sentimentResult.className = 'sentiment-value';
-
-                    let fillColor = '#00f2fe';
-                    if (sentiment.includes('pos') || sentiment === '1') {
-                        sentimentResult.classList.add('sentiment-positive');
-                        fillColor = '#00ffaa';
-                    } else if (sentiment.includes('neg') || sentiment === '0' || sentiment === '-1') {
-                        sentimentResult.classList.add('sentiment-negative');
-                        fillColor = '#ff2a85';
-                    } else {
-                        sentimentResult.classList.add('sentiment-neutral');
-                        fillColor = '#ffb703';
-                    }
-
-                    if (data.probability !== null && data.probability !== undefined) {
-                        const probPercent = Math.round(data.probability * 100);
-                        confidenceContainer.style.display = 'block';
-                        confidenceText.innerText = `Confidence Score: ${probPercent}%`;
-                        confidenceFill.style.width = `${probPercent}%`;
-                        confidenceFill.style.background = fillColor;
-                    } else {
-                        confidenceContainer.style.display = 'none';
-                    }
-
-                    resultBox.classList.add('show');
+                    alert(data.error || 'Prediction failed');
                 }
             } catch (err) {
-                alert("Failed to analyze text. Please check server logs.");
+                alert('An error occurred. Make sure backend is running.');
             } finally {
-                btnText.innerText = "Analyze Sentiment";
-                btnLoader.style.display = "none";
+                btnText.style.display = 'inline-flex';
+                btnSpinner.style.display = 'none';
                 submitBtn.disabled = false;
             }
         });
+
+        function displayResult(pred) {
+            const raw = String(pred).toLowerCase();
+            resultBadge.className = 'result-badge';
+
+            if (raw.includes('pos') || raw === '1' || raw === 'positive') {
+                resultBadge.classList.add('positive');
+                sentimentIcon.innerHTML = '<i class="fa-solid fa-face-smile"></i>';
+                sentimentTitle.textContent = 'Positive Sentiment';
+                sentimentDesc.textContent = 'High level of positive polarity detected.';
+            } else if (raw.includes('neg') || raw === '0' || raw === '-1' || raw === 'negative') {
+                resultBadge.classList.add('negative');
+                sentimentIcon.innerHTML = '<i class="fa-solid fa-face-frown"></i>';
+                sentimentTitle.textContent = 'Negative Sentiment';
+                sentimentDesc.textContent = 'Negative tone or critical polarity detected.';
+            } else {
+                resultBadge.classList.add('neutral');
+                sentimentIcon.innerHTML = '<i class="fa-solid fa-face-meh"></i>';
+                sentimentTitle.textContent = 'Neutral Sentiment';
+                sentimentDesc.textContent = 'Balanced or neutral statement format.';
+            }
+
+            resultContainer.classList.add('show');
+        }
     </script>
 </body>
 </html>
@@ -394,37 +437,21 @@ def home():
 @app.route('/predict', methods=['POST'])
 def predict():
     if not model or not vectorizer:
-        return jsonify({'error': 'Model or Vectorizer file missing on server.'}), 500
+        return jsonify({"error": "Model files (.pkl) are missing or failed to load."}), 500
 
     data = request.get_json()
-    user_text = data.get('text', '')
+    text = data.get('text', '')
 
-    if not user_text:
-        return jsonify({'error': 'Empty input text provided.'}), 400
+    if not text:
+        return jsonify({"error": "No text provided"}), 400
 
-    # Vectorize input text
-    vectorized_text = vectorizer.transform([user_text])
-    
-    # Generate prediction
-    prediction = model.predict(vectorized_text)[0]
+    # Vectorize input text and predict
+    text_vectorized = vectorizer.transform([text])
+    prediction = model.predict(text_vectorized)[0]
 
-    # Calculate probability if model supports predict_proba
-    probability = None
-    if hasattr(model, "predict_proba"):
-        probs = model.predict_proba(vectorized_text)[0]
-        probability = float(max(probs))
-
-    # Format sentiment output string
-    sentiment_label = str(prediction)
-    if str(prediction) == '1':
-        sentiment_label = "Positive"
-    elif str(prediction) == '0':
-        sentiment_label = "Negative"
-
-    return jsonify({
-        'sentiment': sentiment_label,
-        'probability': probability
-    })
+    # Convert numeric outputs if necessary
+    return jsonify({"prediction": str(prediction)})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
