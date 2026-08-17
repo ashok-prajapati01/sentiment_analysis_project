@@ -1,457 +1,338 @@
+from flask import Flask, request, jsonify, render_template_string
+import pickle
 import os
-import joblib
-from flask import Flask, render_template_string, request, jsonify
+import warnings
 
-app = Flask(__name__)
+# ------------------------------------------------------------
+# Sentiment Analysis Flask App
+# Uses the uploaded model.pkl + vectorizer.pkl directly.
+# ------------------------------------------------------------
 
-# Load model and vectorizer
-MODEL_PATH = "model.pkl"
-VECTORIZER_PATH = "vectorizer.pkl"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, "model.pkl")
+VECTORIZER_PATH = os.path.join(BASE_DIR, "vectorizer.pkl")
 
-try:
-    model = joblib.load(MODEL_PATH)
-    vectorizer = joblib.load(VECTORIZER_PATH)
-    print("Model and vectorizer loaded successfully.")
-except Exception as e:
-    model = None
-    vectorizer = None
-    print(f"Error loading model or vectorizer: {e}")
+# The uploaded model/vectorizer were trained with scikit-learn 1.6.1.
+warnings.filterwarnings("ignore", category=UserWarning)
 
-# Single-file HTML/CSS/JS with Glassmorphism UI
-HTML_TEMPLATE = """
+with open(MODEL_PATH, "rb") as f:
+    model = pickle.load(f)
+
+with open(VECTORIZER_PATH, "rb") as f:
+    vectorizer = pickle.load(f)
+
+
+def predict_sentiment(text):
+    """Transform raw text with the original TF-IDF vectorizer, then predict."""
+    if not isinstance(text, str):
+        raise ValueError("Text must be a string.")
+
+    text = text.strip()
+    if not text:
+        raise ValueError("Please enter some text.")
+
+    # IMPORTANT: use the exact vectorizer that was supplied with the model.
+    features = vectorizer.transform([text])
+    prediction = model.predict(features)[0]
+
+    confidence = None
+    if hasattr(model, "predict_proba"):
+        probabilities = model.predict_proba(features)[0]
+        confidence = float(max(probabilities))
+
+    label = str(prediction).strip().lower()
+
+    # Supports the labels in the supplied model: negative / positive.
+    if label in {"positive", "pos", "1", "true"}:
+        normalized = "positive"
+    elif label in {"negative", "neg", "0", "false"}:
+        normalized = "negative"
+    else:
+        normalized = label
+
+    return {
+        "sentiment": normalized,
+        "confidence": round(confidence * 100, 2) if confidence is not None else None
+    }
+
+
+HTML = r"""
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Sentiment Analysis</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SentimentAI • Text Sentiment Analyzer</title>
+<meta name="description" content="AI-powered sentiment analysis using TF-IDF and a trained machine-learning model.">
+<style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+        --bg: #070b17;
+        --card: rgba(17, 24, 46, .62);
+        --card-border: rgba(255,255,255,.12);
+        --text: #f7f8ff;
+        --muted: #a7afc7;
+        --primary: #8b5cf6;
+        --secondary: #06b6d4;
+        --positive: #22c55e;
+        --negative: #ef4444;
+    }
+    html { scroll-behavior: smooth; }
+    body {
+        min-height: 100vh;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--text);
+        background:
+            radial-gradient(circle at 10% 10%, rgba(139,92,246,.25), transparent 30%),
+            radial-gradient(circle at 90% 15%, rgba(6,182,212,.20), transparent 28%),
+            radial-gradient(circle at 50% 100%, rgba(59,130,246,.16), transparent 35%),
+            var(--bg);
+        overflow-x: hidden;
+    }
+    body::before {
+        content: "";
+        position: fixed; inset: 0; pointer-events: none; z-index: -1;
+        background-image: linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
+                          linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px);
+        background-size: 42px 42px;
+        mask-image: linear-gradient(to bottom, black, transparent 90%);
+    }
+    .orb {
+        position: fixed; border-radius: 50%; filter: blur(4px); opacity: .35;
+        pointer-events: none; z-index: -1; animation: float 9s ease-in-out infinite;
+    }
+    .orb.one { width: 170px; height:170px; background:#8b5cf6; top:18%; left:-70px; }
+    .orb.two { width: 130px; height:130px; background:#06b6d4; right:-40px; top:48%; animation-delay:-3s; }
+    @keyframes float { 0%,100%{transform:translateY(0) scale(1)} 50%{transform:translateY(-28px) scale(1.06)} }
 
-    <!-- Google Fonts & FontAwesome -->
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    .wrap { width:min(1080px, 92%); margin:auto; padding:28px 0 55px; }
+    nav { display:flex; justify-content:space-between; align-items:center; margin-bottom:58px; }
+    .brand { display:flex; align-items:center; gap:11px; font-weight:800; letter-spacing:.2px; }
+    .logo {
+        width:42px; height:42px; border-radius:13px; display:grid; place-items:center;
+        background:linear-gradient(135deg, #8b5cf6, #06b6d4);
+        box-shadow:0 10px 35px rgba(139,92,246,.35); font-size:21px;
+    }
+    .badge { border:1px solid var(--card-border); background:rgba(255,255,255,.05);
+        padding:8px 12px; border-radius:999px; color:var(--muted); font-size:12px; backdrop-filter:blur(12px); }
 
-    <style>
-        :root {
-            --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%);
-            --glass-bg: rgba(255, 255, 255, 0.05);
-            --glass-border: rgba(255, 255, 255, 0.12);
-            --glass-shadow: 0 25px 45px rgba(0, 0, 0, 0.4);
-            --accent-cyan: #06b6d4;
-            --accent-purple: #a855f7;
-            --text-main: #f8fafc;
-            --text-muted: #94a3b8;
-        }
+    .hero { text-align:center; margin-bottom:34px; animation:rise .8s ease both; }
+    @keyframes rise { from{opacity:0; transform:translateY(18px)} to{opacity:1; transform:translateY(0)} }
+    .eyebrow { color:#b9a6ff; text-transform:uppercase; letter-spacing:3px; font-size:11px; font-weight:800; margin-bottom:14px; }
+    h1 { font-size:clamp(40px, 7vw, 72px); line-height:.98; letter-spacing:-3px; }
+    .gradient { background:linear-gradient(90deg,#fff,#c4b5fd,#67e8f9); -webkit-background-clip:text; color:transparent; }
+    .subtitle { max-width:650px; margin:18px auto 0; color:var(--muted); line-height:1.7; font-size:16px; }
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: 'Plus Jakarta Sans', sans-serif;
-        }
+    .glass {
+        background:linear-gradient(145deg, rgba(255,255,255,.085), rgba(255,255,255,.035));
+        border:1px solid var(--card-border); box-shadow:0 25px 70px rgba(0,0,0,.30), inset 0 1px rgba(255,255,255,.07);
+        backdrop-filter:blur(22px); -webkit-backdrop-filter:blur(22px);
+    }
+    .panel { border-radius:28px; padding:25px; animation:rise .8s .12s ease both; }
+    .labelrow { display:flex; justify-content:space-between; margin-bottom:11px; color:#dce1f5; font-weight:700; font-size:14px; }
+    textarea {
+        width:100%; min-height:190px; resize:vertical; border-radius:19px; padding:20px;
+        color:var(--text); background:rgba(3,7,18,.52); border:1px solid rgba(255,255,255,.09);
+        outline:none; font:inherit; line-height:1.65; transition:.25s;
+    }
+    textarea:focus { border-color:rgba(139,92,246,.75); box-shadow:0 0 0 4px rgba(139,92,246,.12); }
+    textarea::placeholder { color:#66708c; }
+    .actions { display:flex; gap:12px; margin-top:15px; flex-wrap:wrap; }
+    button {
+        border:0; cursor:pointer; font:inherit; font-weight:800; border-radius:14px; padding:13px 20px;
+        transition:.2s; color:#fff;
+    }
+    .primary { flex:1; min-width:180px; background:linear-gradient(135deg,#8b5cf6,#06b6d4);
+        box-shadow:0 12px 30px rgba(99,102,241,.25); }
+    .secondary { background:rgba(255,255,255,.07); border:1px solid var(--card-border); color:#d9def1; }
+    button:hover { transform:translateY(-2px); filter:brightness(1.08); }
+    button:active { transform:translateY(0); }
 
-        body {
-            min-height: 100vh;
-            background: var(--bg-gradient);
-            background-size: 400% 400%;
-            animation: gradientShift 15s ease infinite;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-            overflow-x: hidden;
-            color: var(--text-main);
-        }
+    .result { margin-top:18px; display:none; border-radius:22px; padding:20px; animation:pop .45s ease; }
+    @keyframes pop { from{opacity:0;transform:scale(.98)} to{opacity:1;transform:scale(1)} }
+    .result.positive { border-color:rgba(34,197,94,.35); background:rgba(34,197,94,.07); }
+    .result.negative { border-color:rgba(239,68,68,.35); background:rgba(239,68,68,.07); }
+    .resulthead { display:flex; align-items:center; gap:14px; }
+    .emoji { width:52px; height:52px; border-radius:16px; display:grid; place-items:center; font-size:25px; background:rgba(255,255,255,.08); }
+    .result h2 { text-transform:capitalize; font-size:25px; }
+    .result small { color:var(--muted); }
+    .meter { height:8px; border-radius:20px; background:rgba(255,255,255,.08); margin-top:18px; overflow:hidden; }
+    .fill { height:100%; width:0; border-radius:20px; background:linear-gradient(90deg,#8b5cf6,#06b6d4); transition:width 1s cubic-bezier(.2,.8,.2,1); }
 
-        @keyframes gradientShift {
-            0% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
-            100% { background-position: 0% 50%; }
-        }
+    .features { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:18px; }
+    .feature { padding:19px; border-radius:20px; }
+    .feature .icon { font-size:22px; margin-bottom:10px; }
+    .feature h3 { font-size:14px; margin-bottom:5px; }
+    .feature p { color:var(--muted); font-size:12px; line-height:1.55; }
 
-        /* Ambient Glow Spheres */
-        .ambient-sphere {
-            position: absolute;
-            border-radius: 50%;
-            filter: blur(80px);
-            z-index: 0;
-            opacity: 0.6;
-            animation: float 8s ease-in-out infinite alternate;
-        }
+    .guide { margin-top:22px; padding:24px; border-radius:24px; }
+    .guide h2 { margin-bottom:12px; font-size:18px; }
+    .steps { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+    .step { border:1px solid rgba(255,255,255,.08); border-radius:16px; padding:15px; background:rgba(0,0,0,.12); }
+    .num { color:#a78bfa; font-weight:900; font-size:12px; }
+    .step p { color:var(--muted); font-size:12px; line-height:1.55; margin-top:6px; }
+    footer { text-align:center; color:#68728d; font-size:12px; margin-top:28px; }
 
-        .sphere-1 {
-            width: 300px;
-            height: 300px;
-            background: #a855f7;
-            top: 10%;
-            left: 15%;
-        }
+    .loading { display:none; width:16px; height:16px; border:2px solid rgba(255,255,255,.35); border-top-color:#fff; border-radius:50%; animation:spin .7s linear infinite; }
+    @keyframes spin { to{transform:rotate(360deg)} }
 
-        .sphere-2 {
-            width: 350px;
-            height: 350px;
-            background: #06b6d4;
-            bottom: 10%;
-            right: 15%;
-            animation-delay: -4s;
-        }
-
-        @keyframes float {
-            0% { transform: translateY(0px) scale(1); }
-            100% { transform: translateY(-30px) scale(1.08); }
-        }
-
-        /* Glassmorphism Container */
-        .glass-card {
-            position: relative;
-            z-index: 10;
-            width: 100%;
-            max-width: 650px;
-            background: var(--glass-bg);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid var(--glass-border);
-            border-radius: 24px;
-            padding: 40px;
-            box-shadow: var(--glass-shadow);
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-        }
-
-        .glass-card:hover {
-            border-color: rgba(255, 255, 255, 0.2);
-            box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5), 0 0 30px rgba(168, 85, 247, 0.15);
-        }
-
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-
-        .header h1 {
-            font-size: 2.2rem;
-            font-weight: 700;
-            background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            margin-bottom: 10px;
-        }
-
-        .header p {
-            color: var(--text-muted);
-            font-size: 0.95rem;
-        }
-
-        /* Input Area */
-        .input-group {
-            margin-bottom: 25px;
-            position: relative;
-        }
-
-        textarea {
-            width: 100%;
-            height: 140px;
-            background: rgba(15, 23, 42, 0.6);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-radius: 16px;
-            padding: 16px;
-            color: #ffffff;
-            font-size: 1rem;
-            resize: none;
-            outline: none;
-            transition: all 0.3s ease;
-        }
-
-        textarea:focus {
-            border-color: var(--accent-cyan);
-            box-shadow: 0 0 20px rgba(6, 182, 212, 0.25);
-            background: rgba(15, 23, 42, 0.8);
-        }
-
-        textarea::placeholder {
-            color: #64748b;
-        }
-
-        /* Action Buttons */
-        .button-group {
-            display: flex;
-            gap: 12px;
-        }
-
-        .btn {
-            flex: 1;
-            padding: 14px 24px;
-            border: none;
-            border-radius: 14px;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-        }
-
-        .btn-submit {
-            background: linear-gradient(135deg, var(--accent-purple) 0%, var(--accent-cyan) 100%);
-            color: #ffffff;
-            box-shadow: 0 8px 20px rgba(168, 85, 247, 0.3);
-        }
-
-        .btn-submit:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 12px 28px rgba(6, 182, 212, 0.4);
-            filter: brightness(1.1);
-        }
-
-        .btn-submit:active {
-            transform: translateY(0);
-        }
-
-        .btn-clear {
-            background: rgba(255, 255, 255, 0.08);
-            color: var(--text-muted);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .btn-clear:hover {
-            background: rgba(255, 255, 255, 0.15);
-            color: #ffffff;
-        }
-
-        /* Result Display Container */
-        .result-container {
-            margin-top: 25px;
-            opacity: 0;
-            max-height: 0;
-            overflow: hidden;
-            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        .result-container.show {
-            opacity: 1;
-            max-height: 200px;
-        }
-
-        .result-badge {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-radius: 16px;
-            padding: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            backdrop-filter: blur(10px);
-        }
-
-        .sentiment-info {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-
-        .sentiment-icon {
-            width: 48px;
-            height: 48px;
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.5rem;
-        }
-
-        .positive .sentiment-icon {
-            background: rgba(34, 197, 94, 0.2);
-            color: #4ade80;
-            border: 1px solid rgba(34, 197, 94, 0.3);
-        }
-
-        .negative .sentiment-icon {
-            background: rgba(239, 68, 68, 0.2);
-            color: #f87171;
-            border: 1px solid rgba(239, 68, 68, 0.3);
-        }
-
-        .neutral .sentiment-icon {
-            background: rgba(234, 179, 8, 0.2);
-            color: #facc15;
-            border: 1px solid rgba(234, 179, 8, 0.3);
-        }
-
-        .sentiment-text h3 {
-            font-size: 1.1rem;
-            font-weight: 600;
-        }
-
-        .sentiment-text p {
-            font-size: 0.85rem;
-            color: var(--text-muted);
-        }
-
-        /* Loading Spinner */
-        .spinner {
-            display: none;
-            width: 20px;
-            height: 20px;
-            border: 3px solid rgba(255, 255, 255, 0.3);
-            border-radius: 50%;
-            border-top-color: #ffffff;
-            animation: spin 0.8s linear infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        @media (max-width: 480px) {
-            .glass-card { padding: 25px; }
-            .button-group { flex-direction: column; }
-        }
-    </style>
+    @media(max-width:760px) {
+        nav { margin-bottom:38px; }
+        .badge { display:none; }
+        .panel { padding:17px; border-radius:22px; }
+        .features,.steps { grid-template-columns:1fr; }
+        h1 { letter-spacing:-2px; }
+    }
+</style>
 </head>
 <body>
+<div class="orb one"></div><div class="orb two"></div>
+<div class="wrap">
+    <nav>
+        <div class="brand"><div class="logo">✦</div><span>SentimentAI</span></div>
+        <div class="badge">TF-IDF • Multinomial Naive Bayes</div>
+    </nav>
 
-    <div class="ambient-sphere sphere-1"></div>
-    <div class="ambient-sphere sphere-2"></div>
+    <section class="hero">
+        <div class="eyebrow">Intelligent Text Analysis</div>
+        <h1>Understand the <span class="gradient">feeling</span><br>behind every word.</h1>
+        <p class="subtitle">Enter a sentence, review or message and let your trained machine-learning model classify it as positive or negative.</p>
+    </section>
 
-    <div class="glass-card">
-        <div class="header">
-            <h1><i class="fa-solid fa-brain-circuit" style="margin-right: 8px; color: var(--accent-cyan);"></i>Sentiment AI</h1>
-            <p>Analyze the emotional tone of any input text instantly</p>
+    <main class="glass panel">
+        <div class="labelrow"><span>Your text</span><span id="counter">0 / 2000</span></div>
+        <textarea id="text" maxlength="2000" placeholder="Try: “The product is fantastic and I absolutely love the experience!”"></textarea>
+        <div class="actions">
+            <button class="secondary" id="clearBtn">Clear</button>
+            <button class="primary" id="analyzeBtn"><span id="btnText">Analyze Sentiment</span><span class="loading" id="loader"></span></button>
         </div>
 
-        <form id="sentimentForm">
-            <div class="input-group">
-                <textarea id="userInput" placeholder="Type or paste your text here..." required></textarea>
+        <div id="result" class="glass result">
+            <div class="resulthead">
+                <div class="emoji" id="emoji">✨</div>
+                <div><small>Prediction</small><h2 id="sentiment">—</h2></div>
             </div>
-
-            <div class="button-group">
-                <button type="button" class="btn btn-clear" id="clearBtn">
-                    <i class="fa-solid fa-rotate-left"></i> Clear
-                </button>
-                <button type="submit" class="btn btn-submit" id="submitBtn">
-                    <span id="btnText"><i class="fa-solid fa-wand-magic-sparkles"></i> Analyze Sentiment</span>
-                    <div class="spinner" id="btnSpinner"></div>
-                </button>
-            </div>
-        </form>
-
-        <div class="result-container" id="resultContainer">
-            <div class="result-badge" id="resultBadge">
-                <div class="sentiment-info">
-                    <div class="sentiment-icon" id="sentimentIcon">
-                        <i class="fa-solid fa-face-smile"></i>
-                    </div>
-                    <div class="sentiment-text">
-                        <h3 id="sentimentTitle">Positive Sentiment</h3>
-                        <p id="sentimentDesc">The model predicts positive emotion in this text.</p>
-                    </div>
-                </div>
-            </div>
+            <div class="meter"><div class="fill" id="fill"></div></div>
+            <div style="margin-top:9px;color:#a7afc7;font-size:12px" id="confidence">Confidence: —</div>
         </div>
-    </div>
+    </main>
 
-    <script>
-        const form = document.getElementById('sentimentForm');
-        const userInput = document.getElementById('userInput');
-        const clearBtn = document.getElementById('clearBtn');
-        const submitBtn = document.getElementById('submitBtn');
-        const btnText = document.getElementById('btnText');
-        const btnSpinner = document.getElementById('btnSpinner');
-        const resultContainer = document.getElementById('resultContainer');
-        const resultBadge = document.getElementById('resultBadge');
-        const sentimentIcon = document.getElementById('sentimentIcon');
-        const sentimentTitle = document.getElementById('sentimentTitle');
-        const sentimentDesc = document.getElementById('sentimentDesc');
+    <section class="features">
+        <div class="glass feature"><div class="icon">⚡</div><h3>Instant inference</h3><p>Your text is transformed by the original TF-IDF vectorizer before prediction.</p></div>
+        <div class="glass feature"><div class="icon">🧠</div><h3>Your trained model</h3><p>This app loads the supplied Multinomial Naive Bayes model rather than retraining it.</p></div>
+        <div class="glass feature"><div class="icon">🔒</div><h3>Simple & lightweight</h3><p>Flask serves one responsive interface and a JSON prediction endpoint.</p></div>
+    </section>
 
-        clearBtn.addEventListener('click', () => {
-            userInput.value = '';
-            resultContainer.classList.remove('show');
-            userInput.focus();
+    <section class="glass guide">
+        <h2>🚀 Render deployment guide</h2>
+        <div class="steps">
+            <div class="step"><div class="num">01 — FILES</div><p>Keep <b>app.py</b>, <b>model.pkl</b>, <b>vectorizer.pkl</b> and <b>requirements.txt</b> in the same GitHub repository.</p></div>
+            <div class="step"><div class="num">02 — REPO</div><p>Push the four files to GitHub. The model filename must be exactly <b>model.pkl</b>.</p></div>
+            <div class="step"><div class="num">03 — RENDER</div><p>Create a new Render Web Service, select your repository, and use Python as the runtime.</p></div>
+            <div class="step"><div class="num">04 — COMMAND</div><p>Build: <b>pip install -r requirements.txt</b><br>Start: <b>gunicorn app:app</b></p></div>
+        </div>
+    </section>
+
+    <footer>Built with Flask + scikit-learn • Original TF-IDF vectorizer preserved</footer>
+</div>
+
+<script>
+const text = document.getElementById("text");
+const counter = document.getElementById("counter");
+const result = document.getElementById("result");
+const analyzeBtn = document.getElementById("analyzeBtn");
+const loader = document.getElementById("loader");
+const btnText = document.getElementById("btnText");
+
+text.addEventListener("input", () => counter.textContent = `${text.value.length} / 2000`);
+
+document.getElementById("clearBtn").addEventListener("click", () => {
+    text.value = "";
+    counter.textContent = "0 / 2000";
+    result.style.display = "none";
+    text.focus();
+});
+
+async function analyze() {
+    const value = text.value.trim();
+    if (!value) {
+        text.focus();
+        text.style.borderColor = "rgba(239,68,68,.7)";
+        setTimeout(() => text.style.borderColor = "", 900);
+        return;
+    }
+
+    analyzeBtn.disabled = true;
+    btnText.style.display = "none";
+    loader.style.display = "inline-block";
+
+    try {
+        const response = await fetch("/predict", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({text: value})
         });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Prediction failed.");
 
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const text = userInput.value.trim();
-            if (!text) return;
+        result.className = `glass result ${data.sentiment}`;
+        result.style.display = "block";
+        document.getElementById("sentiment").textContent = data.sentiment;
+        document.getElementById("emoji").textContent = data.sentiment === "positive" ? "😊" : "☹️";
 
-            // UI Loading state
-            btnText.style.display = 'none';
-            btnSpinner.style.display = 'block';
-            submitBtn.disabled = true;
+        const confidence = data.confidence;
+        document.getElementById("confidence").textContent =
+            confidence !== null ? `Confidence: ${confidence}%` : "Confidence unavailable";
 
-            try {
-                const response = await fetch('/predict', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: text })
-                });
-
-                const data = await response.json();
-
-                if (response.ok) {
-                    displayResult(data.prediction);
-                } else {
-                    alert(data.error || 'Prediction failed');
-                }
-            } catch (err) {
-                alert('An error occurred. Make sure backend is running.');
-            } finally {
-                btnText.style.display = 'inline-flex';
-                btnSpinner.style.display = 'none';
-                submitBtn.disabled = false;
-            }
+        requestAnimationFrame(() => {
+            document.getElementById("fill").style.width = `${confidence ?? 0}%`;
         });
+    } catch (err) {
+        result.className = "glass result negative";
+        result.style.display = "block";
+        document.getElementById("emoji").textContent = "⚠️";
+        document.getElementById("sentiment").textContent = "Error";
+        document.getElementById("confidence").textContent = err.message;
+        document.getElementById("fill").style.width = "0%";
+    } finally {
+        analyzeBtn.disabled = false;
+        btnText.style.display = "inline";
+        loader.style.display = "none";
+    }
+}
 
-        function displayResult(pred) {
-            const raw = String(pred).toLowerCase();
-            resultBadge.className = 'result-badge';
-
-            if (raw.includes('pos') || raw === '1' || raw === 'positive') {
-                resultBadge.classList.add('positive');
-                sentimentIcon.innerHTML = '<i class="fa-solid fa-face-smile"></i>';
-                sentimentTitle.textContent = 'Positive Sentiment';
-                sentimentDesc.textContent = 'High level of positive polarity detected.';
-            } else if (raw.includes('neg') || raw === '0' || raw === '-1' || raw === 'negative') {
-                resultBadge.classList.add('negative');
-                sentimentIcon.innerHTML = '<i class="fa-solid fa-face-frown"></i>';
-                sentimentTitle.textContent = 'Negative Sentiment';
-                sentimentDesc.textContent = 'Negative tone or critical polarity detected.';
-            } else {
-                resultBadge.classList.add('neutral');
-                sentimentIcon.innerHTML = '<i class="fa-solid fa-face-meh"></i>';
-                sentimentTitle.textContent = 'Neutral Sentiment';
-                sentimentDesc.textContent = 'Balanced or neutral statement format.';
-            }
-
-            resultContainer.classList.add('show');
-        }
-    </script>
+analyzeBtn.addEventListener("click", analyze);
+text.addEventListener("keydown", e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") analyze();
+});
+</script>
 </body>
 </html>
 """
 
-@app.route('/')
+@app.get("/")
 def home():
-    return render_template_string(HTML_TEMPLATE)
+    return render_template_string(HTML)
 
-@app.route('/predict', methods=['POST'])
+
+@app.post("/predict")
 def predict():
-    if not model or not vectorizer:
-        return jsonify({"error": "Model files (.pkl) are missing or failed to load."}), 500
+    try:
+        data = request.get_json(silent=True) or {}
+        text = data.get("text", "")
+        result = predict_sentiment(text)
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception:
+        return jsonify({"error": "Unable to process this text."}), 500
 
-    data = request.get_json()
-    text = data.get('text', '')
 
-    if not text:
-        return jsonify({"error": "No text provided"}), 400
+@app.get("/health")
+def health():
+    return jsonify({"status": "ok"})
 
-    # Vectorize input text and predict
-    text_vectorized = vectorizer.transform([text])
-    prediction = model.predict(text_vectorized)[0]
 
-    # Convert numeric outputs if necessary
-    return jsonify({"prediction": str(prediction)})
-
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+if __name__ == "__main__":
+    # Local development only. Render uses gunicorn via the start command.
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
